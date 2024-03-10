@@ -256,5 +256,9 @@ class HTMLServer:
         except:
             pass
 
-    def serve_forever(self):
+    def serve_forever(self, templates: Dict[str, str], static: Dict[str, str]):
+        for key, value in templates.items():
+            TEMPLATES[key] = value
+        for key, value in static.items():
+            STATIC[key] = value
         asyncio.run(self.start())

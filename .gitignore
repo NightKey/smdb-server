@@ -3,3 +3,5 @@
 */characters*
 *.log
 *.help*
+*.egg*
+*dist*
