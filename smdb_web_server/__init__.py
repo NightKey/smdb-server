@@ -256,10 +256,11 @@ class HTMLServer:
         except:
             pass
 
-    def serve_forever_threaded(self, templates: Dict[str, str], static: Dict[str, str], thread_name: str = "SMDB HTTP Server") -> None:
+    def serve_forever_threaded(self, templates: Dict[str, str], static: Dict[str, str], thread_name: str = "SMDB HTTP Server") -> Thread:
         thread = Thread(target=self.serve_forever, args=[templates, static])
         thread.name = thread_name
         thread.start()
+        return thread
 
     def serve_forever(self, templates: Dict[str, str], static: Dict[str, str]) -> None:
         for key, value in templates.items():
