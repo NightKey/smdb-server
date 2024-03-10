@@ -1,0 +1,5 @@
+*__py*
+*.vs*
+*/characters*
+*.log
+*.help*
