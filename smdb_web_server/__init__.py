@@ -3,8 +3,9 @@ from typing import Callable, Dict, Optional, Union, Any, List
 from os import path
 from smdb_logger import Logger, LEVEL
 from json import dumps
-from threading import Thread
+from threading import Thread, Event
 from time import perf_counter_ns
+from enum import Enum
 
 class KnownError(Exception):
     def __init__(self, reason: str, response_code: int) -> None:
@@ -12,6 +13,10 @@ class KnownError(Exception):
     
     def __str__(self) -> str:
         return f"Reason: {self.response.name}, Code: {self.response.value}"
+    
+class CloseException(Exception):
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
 
 class ResponseCode():
     def __init__(self, value: int, name: str):
@@ -32,6 +37,10 @@ class Timer():
     def __str__(self) -> str:
         return f"{(self.end - self.start)/1000000}"
 
+class Protocol(Enum):
+    Get = "GET"
+    Put = "PUT"
+
 NotFound = ResponseCode(404, "Not Found")
 Ok = ResponseCode(200, "Ok")
 InternalServerError = ResponseCode(500, "Internal Server Error")
@@ -39,7 +48,7 @@ TPot = ResponseCode(418, "I'm a teapot")
 
 get_rules: Dict[str, Callable[[Dict[str, str]], None]] = {}
 put_rules: Dict[str, Callable[[bytes], None]] = {}
-title: str = None
+pageTitle: str = None
 html_template: str = "<html><header><link rel='stylesheet' href='/static/style.css' /><title>{title}</title></header><body>{content}</body></html>"
 http_header: str = "{version_info} {response_code}\r\nContent-Length: {length}\r\nContent-Type: {content_type};\r\nServer-Timing: {timing}\r\n\r\n"
 cwd: str = "."
@@ -57,6 +66,7 @@ class HTTPRequestHandler():
         self.data: str = ""
         self.version: str = "HTTP/1.0"
         self.logger = logger
+        self.close_event = Event()
 
     async def handle_request(self):
         try:
@@ -78,9 +88,11 @@ class HTTPRequestHandler():
             elif (method == "PUT"):
                 put_th = Thread(target=self.do_PUT)
                 put_th.start()
+        except CloseException:
+            self.close_event.set()
         except Exception as ex :
-            self.logger.debug(f"Exception: {ex}")
-            html_file = html_template.format(title=title, content=ex)
+            self.logger.error(f"Exception: {ex}")
+            html_file = html_template.format(title=pageTitle, content=ex)
             response_code = InternalServerError
             self.send_message(response_code, html_file)
 
@@ -90,9 +102,9 @@ class HTTPRequestHandler():
         _404_time = Timer()
         _404_file = ""
         if ("404" in TEMPLATES):
-            _404_file = TEMPLATES["404"].format(title=title)
+            _404_file = TEMPLATES["404"].format(title=pageTitle)
         else:
-            _404_file = html_template.format(title=title, content="404 NOT FOUND")
+            _404_file = html_template.format(title=pageTitle, content="404 NOT FOUND")
         _404_time.stop()
         do_get.stop()
         self.send_message(NotFound, _404_file, f"full;dur={do_get}, process;dur={_404_time}")
@@ -107,12 +119,14 @@ class HTTPRequestHandler():
         return data
 
     def send_message(self, response_code: ResponseCode, payload: Union[str, Dict[Any, Any], bytes], timing: str = "") -> None:
+        if self.close_event.is_set(): return
         content_type = "text/html"
         if isinstance(payload, (dict)):
             content_type = "application/json"
             payload = dumps(payload)
         if isinstance(payload, bytes):
             content_type = "image/ico"
+        if payload is None: payload = ""
         data = http_header.format(version_info=self.version, response_code=str(response_code), content_type=content_type, length=len(payload), timing=timing).encode()
         if (self.logger):
             self.logger.debug(f"Sending data: {data.decode()} with payload: {payload}")
@@ -131,16 +145,21 @@ class HTTPRequestHandler():
                 html_file = get_rules[self.path](self.path_params)
                 response_code = Ok
             except KnownError as ke:
-                html_file = html_template.format(title=title, content=ke.response.name)
+                html_file = html_template.format(title=pageTitle, content=ke.response.name)
                 response_code = ke.response
                 if (self.logger):
                     self.logger.warning(f"Known Exception: {ke}")
+            except CloseException:
+                self.close_event.set()
             except Exception as ex:
-                html_file = html_template.format(title=title, content=ex)
+                html_file = html_template.format(title=pageTitle, content=ex)
                 response_code = InternalServerError
                 if (self.logger):
                     self.logger.error(f"Exception: {ex}")
             finally:
+                if self.close_event.is_set():
+                    self.writer.close()
+                    return
                 do_get.stop()
                 get_rules_time.stop()
                 self.send_message(response_code, html_file, f"full;dur={do_get}, process;dur={get_rules_time}")
@@ -174,24 +193,31 @@ class HTTPRequestHandler():
             message_return = ke.response
             if (self.logger):
                 self.logger.warning(f"Known Exception: {ke}")
+        except CloseException:
+                self.close_event.set()
         except Exception as ex:
             message_return = InternalServerError
             if (self.logger):
                 self.logger.error(f"Exception: {ex}")
-        do_put.stop()
-        self.send_message(message_return, "", f"full={do_put}")
+        finally:
+            if self.close_event.is_set():
+                self.writer.close()
+                return
+            do_put.stop()
+            self.send_message(message_return, "", f"full={do_put}")
 
 class HTMLServer:
-    def __init__(self, host: str, port: int, root_path: str = ".", logger: Optional[Logger] = None, _title: str = "HTML Server"):
-        global title
+    def __init__(self, host: str, port: int, root_path: str = ".", logger: Optional[Logger] = None, title: str = "HTML Server"):
+        global pageTitle
         global cwd
         self.host = host
         self.port = port
         self.logger = logger
         self.handler: HTTPRequestHandler = HTTPRequestHandler
         self.server = None
-        title = _title
+        pageTitle = title
         cwd = root_path
+        self.close_event = Event()
 
     def try_log(self, data: str, log_level: LEVEL = LEVEL.INFO) -> None:
         if self.logger == None:
@@ -214,20 +240,26 @@ class HTMLServer:
 
     def render_template_list(self, name: str, values: List[str]) -> str:
         original = TEMPLATES[name]
-        ret = ["<option disabled selected value></option>"]
+        ret = []
+        any_selected = False
         for val in values:
-            tmp = original.replace("{{VALUE}}", val.split('|')[0])
-            tmp = tmp.replace("{{SELECTED}}", "selected" if len(val.split('|')) > 1 else "")
+            vals = val.split('|')
+            if len(vals) > 1 and vals[1] == "True": any_selected = True
+            tmp = original.replace("{{VALUE}}", vals[0])
+            tmp = tmp.replace("{{SELECTED}}", " selected" if len(vals) > 1 and vals[1] == "True" else "")
             ret.append(tmp)
+        if ("option" in original):
+            ret.insert(0, f"<option disabled{' selected' if not any_selected else ''} value></option>")
         return "\n".join(ret)
 
-    def add_url_rule(self, rule: str, callback: Union[Callable[[Dict[str, str]], None], Callable[[bytes], None]], protocol: str = "GET") -> None:
-        if (protocol == "GET"):
+    def add_url_rule(self, rule: str, callback: Union[Callable[[Dict[str, str]], None], Callable[[bytes], None]], protocol: Protocol = Protocol.Get) -> None:
+        if (protocol == Protocol.Get):
             get_rules[rule] = callback
-        if (protocol == "PUT"):
+        if (protocol == Protocol.Put):
             put_rules[rule] = callback
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+        if self.close_event.is_set(): return
         addr = writer.get_extra_info('peername')
         self.try_log(f'Accepted connection from {addr[0]}:{addr[1]}')
         handler = self.handler(reader, writer, self.logger)
@@ -253,8 +285,9 @@ class HTMLServer:
             self.try_log("Stopping server")
             if self.server:
                 self.server.close()
-        except:
-            pass
+                self.close_event.set()
+        except Exception as ex:
+            self.try_log(f"Exception stopping server: {ex}")
 
     def serve_forever_threaded(self, templates: Dict[str, str], static: Dict[str, str], thread_name: str = "SMDB HTTP Server") -> Thread:
         thread = Thread(target=self.serve_forever, args=[templates, static])
