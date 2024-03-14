@@ -14,7 +14,7 @@ An easy to use, not secured web server, because I don't like the other options, 
 To start using this HTTP Server, import the `HTMLServer` class, and initialize it.
 
 ```python
-from smdb_web_server import HTMLServer
+from smdb_web_server import HTMLServer, UrlData
 server = HTMLServer("127.0.0.1", 8080, title="Example server")
 ```
 
@@ -23,13 +23,21 @@ An `smdb_logger` can be used, if desired, but not neccesery.
 To add a new url path, use the `add_url_rule` command.
 
 ```python
-def index_handler(path_params: Dict[str, str]) -> str:
+def index_handler(url_data: UrlData) -> str:
     ...
 
 server.add_url_rule("/", index_handler)
 ```
 
 This method will be called with a `GET` request by default. This can be set as an optional parameter called `protocol`. For now, only `GET` and `PUT` are supported.
+
+Url handlers can be assigned with a decorator as well:
+
+```python
+@server.as_url_rule("/help")
+def help_handler(url_data: UrlData) -> str:
+    ...
+```
 
 To start the server, use either the `serve_forever` or the `serve_forever_threaded` function. The first will be a blocking call, the second will create a new thread.
 
@@ -44,7 +52,7 @@ Both handlers can fail with [KnownError](#knownerror) exception, whitch will res
 This handler can return any string, but it's usefull, if it returns an HTML file as string. This can be a hardcoded HTML code, or a static or dynamic file. For rendering HTML template files, the server has a helper function called `render_template_file`. This can render an HTML file from a pre setup dictionary.
 
 ```python
-def index_handler(path_params: Dict[str, str]) -> str:
+def index_handler(url_data: UrlData) -> str:
     example_list = ["value1", "value2|False", "value3|True"]
     return server.render_template("index", page_title="Example Title", example_selector=example_list, button_1="Button 1 name", button_2="Button 2 name")
 ```
@@ -52,7 +60,7 @@ def index_handler(path_params: Dict[str, str]) -> str:
 If you need to just create a list to update an already rendered HTML page's selector, you can use it the following way:
 
 ```python
-def update(path_arguments: Dict[str, str]):
+def update(url_data: UrlData):
     return server.render_template_list("example_selector", ["value1|True", "value2|False", "value3|False"])
 
 server.add_url_rule("/update", update)
@@ -75,16 +83,17 @@ This handler can return a simple string. The incoming data will be a bytearray o
 ```python
 from smdb_web_server import Protocol
 
-def put_handler(data: bytearray) -> str:
-    # [DO STUFF HERE]
-    return "Done"
+def put_handler(url_data: UrlData) -> str:
+    # Do stuff here.
+    # Either return with string, or fail with KnownError
+    ...
 
 server.add_url_rule("/put", put_handler, Protocol.Put)
 ```
 
 ## Data
 
-#### Template dictionary
+### Template dictionary
  - Keys: The "file name" without extention
  - Value: The file's content, or a path in the following format: "PATH|{Relative path to file}"
 
@@ -128,13 +137,13 @@ Here, the `{{VALUE}}` will be replaced by the list's content, and the `{{SELECTE
 
 You can return a list by calling the `render_template_list` function by itself, or by rendering a full HTML page by calling `render_template`, with a list as an argument.
 
-#### Static dictionary
+### Static dictionary
  - Keys: The "file name" without extention
  - Value: Either the file's content, or a path in the following format: "PATH|{Relative path to file}"
 
 Static files will be sent automatically, if the correct URL is called. In the [Template Dictionary](#template-dictionary) example, the javascript and the css files are loaded from the path `/static/{file_name}`. This will result in the `{file_name}` file being served from the dictionary.
 
-#### KnownError
+### KnownError
 
 This error is used to send a usercontrolled response code to the requester. This exception can be used the following way:
 
@@ -144,8 +153,16 @@ def fail(_):
     raise KnownError("Reason", 405)
 ```
 
-#### Protocol
+### Protocol
 
 This is a simple enum class to use with `add_url_rule` to determine the protocol to be used
 
 Values: `Get`, `Put`
+
+### UrlData
+
+This dataclass contains the following fields, either filled or containing `None`:
+
+ - fragment: `String` object (Data following the `#` in the URL)
+ - query: `Dictionary` with string keys and values (Data following the `?` in the URL)
+ - data: `Bytes` object (Payload of the request, if available)

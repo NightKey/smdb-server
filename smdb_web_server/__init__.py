@@ -6,6 +6,7 @@ from json import dumps
 from threading import Thread, Event
 from time import perf_counter_ns
 from enum import Enum
+from dataclasses import dataclass
 
 class KnownError(Exception):
     def __init__(self, reason: str, response_code: int) -> None:
@@ -41,6 +42,15 @@ class Protocol(Enum):
     Get = "GET"
     Put = "PUT"
 
+@dataclass
+class UrlData():
+    query: Dict[str, str]
+    fragment: str
+    data: bytes
+
+    def __str__(self) -> str:
+        return f"UrlData[ path params: {self.query}, fragment: {self.fragment}, data: {self.data} ]"
+
 NotFound = ResponseCode(404, "Not Found")
 Ok = ResponseCode(200, "Ok")
 InternalServerError = ResponseCode(500, "Internal Server Error")
@@ -62,8 +72,7 @@ class HTTPRequestHandler():
         self.writer = writer
         self.headers: Dict[str, str] = None
         self.path: str = ""
-        self.path_params: str = ""
-        self.data: str = ""
+        self.data: UrlData = None
         self.version: str = "HTTP/1.0"
         self.logger = logger
         self.close_event = Event()
@@ -73,16 +82,25 @@ class HTTPRequestHandler():
             tmp = await self.reader.readuntil("\r\n\r\n".encode())
             tmp = tmp.decode().split("\r\n")
             method, tmp_path, _ = tmp[0].split(" ")
+            tmp_path = tmp_path.split("#")
+            fragment = None
+            if (len(tmp_path) > 1):
+                fragment = tmp_path[-1]
+            tmp_path = tmp_path[0]
             tmp_path = tmp_path.split("?")
-            self.path_params = {item.split("=")[0]: item.split("=")[1] for item in tmp_path[-1].split("&") if len(item.split("=")) == 2}
+            query = None
+            if (len(tmp_path) > 1):
+                query = {item.split("=")[0]: item.split("=")[1] for item in tmp_path[-1].split("&") if len(item.split("=")) == 2}
             self.path = tmp_path[0]
             self.headers = {head.split(": ")[0]: head.split(": ")[1] for head in tmp[1:] if head != ''}
             if (self.logger):
                 self.logger.debug(f"Headers retrived: {self.headers}")
+            data = None
             if ("Content-Length" in self.headers):
-                self.data = await self.reader.read(int(self.headers["Content-Length"]))
+                data = await self.reader.read(int(self.headers["Content-Length"]))
                 if (self.logger):
-                    self.logger.debug(f"Data retrived: {self.data}")
+                    self.logger.debug(f"Data retrived: {data}")
+            self.data = UrlData(query, fragment, data)
             if (method == "GET"):
                 self.do_GET()
             elif (method == "PUT"):
@@ -140,9 +158,9 @@ class HTTPRequestHandler():
             html_file = ""
             response_code: ResponseCode = None
             if (self.logger):
-                self.logger.debug(f"Calling GET {self.path} with params: {self.path_params}")
+                self.logger.debug(f"Calling GET {self.path} with params: {self.data}")
             try:
-                html_file = get_rules[self.path](self.path_params)
+                html_file = get_rules[self.path](self.data)
                 response_code = Ok
             except KnownError as ke:
                 html_file = html_template.format(title=pageTitle, content=ke.response.name)
@@ -252,11 +270,16 @@ class HTMLServer:
             ret.insert(0, f"<option disabled{' selected' if not any_selected else ''} value></option>")
         return "\n".join(ret)
 
-    def add_url_rule(self, rule: str, callback: Union[Callable[[Dict[str, str]], None], Callable[[bytes], None]], protocol: Protocol = Protocol.Get) -> None:
+    def add_url_rule(self, rule: str, callback: Callable[[UrlData], str], protocol: Protocol = Protocol.Get) -> None:
         if (protocol == Protocol.Get):
             get_rules[rule] = callback
         if (protocol == Protocol.Put):
             put_rules[rule] = callback
+
+    def as_url_rule(self, rule: str, protocol: Protocol = Protocol.Get) -> Any:
+        def decorator(callback: Callable[[UrlData], str]):
+            self.add_url_rule(rule, callback, protocol)
+        return decorator
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         if self.close_event.is_set(): return
