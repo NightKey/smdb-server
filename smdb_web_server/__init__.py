@@ -99,7 +99,7 @@ class HTTPRequestHandler():
             if ("Content-Length" in self.headers):
                 data = await self.reader.read(int(self.headers["Content-Length"]))
                 if (self.logger):
-                    self.logger.debug(f"Data retrived: {data}")
+                    self.logger.trace(f"Data retrived: {data}")
             self.data = UrlData(query, fragment, data)
             if (method == "GET"):
                 self.do_GET()
@@ -147,7 +147,7 @@ class HTTPRequestHandler():
         if payload is None: payload = ""
         data = http_header.format(version_info=self.version, response_code=str(response_code), content_type=content_type, length=len(payload), timing=timing).encode()
         if (self.logger):
-            self.logger.debug(f"Sending data: {data.decode()} with payload: {payload}")
+            self.logger.trace(f"Sending data: {data.decode()} with payload: {payload}")
         self.writer.write(data)
         self.writer.write(payload.encode() if not isinstance(payload, bytes) else payload)
 
