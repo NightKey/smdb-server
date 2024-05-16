@@ -90,7 +90,7 @@ class HTTPRequestHandler():
             tmp_path = tmp_path.split("?")
             query = None
             if (len(tmp_path) > 1):
-                query = {item.split("=")[0]: item.split("=")[1] for item in tmp_path[-1].split("&") if len(item.split("=")) == 2}
+                query = self.getQueryItems(tmp_path[-1])
             self.path = tmp_path[0]
             self.headers = {head.split(": ")[0]: head.split(": ")[1] for head in tmp[1:] if head != ''}
             if (self.logger):
@@ -113,6 +113,15 @@ class HTTPRequestHandler():
             html_file = html_template.format(title=pageTitle, content=ex)
             response_code = InternalServerError
             self.send_message(response_code, html_file)
+
+    def getQueryItems(self, items: str) -> Dict[str, Any]:
+        ret = {}
+        for item in items.split("&"):
+            if len(item.split("=")) == 2:
+                ret[item.split("=")[0]] = item.split("=")[1]
+            else:
+                ret[item] = None
+        return ret
 
     def __404__(self, do_get: Timer) -> None:
         if (self.logger):

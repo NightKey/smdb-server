@@ -164,5 +164,5 @@ Values: `Get`, `Put`
 This dataclass contains the following fields, either filled or containing `None`:
 
  - fragment: `String` object (Data following the `#` in the URL)
- - query: `Dictionary` with string keys and values (Data following the `?` in the URL)
+ - query: `Dictionary` with string keys and values (Data following the `?` in the URL). The key will be the part following the `?` or `&` characters, and the value will be the part after the `=` sign. If there is no value, `None` will be used as a value in the dictionary.
  - data: `Bytes` object (Payload of the request, if available)
