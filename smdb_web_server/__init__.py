@@ -1,5 +1,5 @@
 import asyncio
-from typing import Callable, Dict, Optional, Union, Any, List
+from typing import Callable, Dict, Optional, Union, Any, List, Tuple
 from os import path
 from smdb_logger import Logger, LEVEL
 from json import dumps
@@ -56,18 +56,20 @@ Ok = ResponseCode(200, "Ok")
 InternalServerError = ResponseCode(500, "Internal Server Error")
 TPot = ResponseCode(418, "I'm a teapot")
 
-get_rules: Dict[str, Callable[[Dict[str, str]], None]] = {}
-put_rules: Dict[str, Callable[[bytes], None]] = {}
+get_rules: Dict[str, Tuple[Callable[[Dict[str, str]], None], bool]] = {}
+put_rules: Dict[str, Tuple[Callable[[bytes], None], bool]] = {}
 pageTitle: str = None
 html_template: str = "<html><header><link rel='stylesheet' href='/static/style.css' /><title>{title}</title></header><body>{content}</body></html>"
-http_header: str = "{version_info} {response_code}\r\nContent-Length: {length}\r\nContent-Type: {content_type};\r\nServer-Timing: {timing}\r\n\r\n"
+http_header: str = "{version_info} {response_code}\r\nContent-Length: {length}\r\nContent-Type: {content_type}{cache_controll};\r\nServer-Timing: {timing}\r\n\r\n"
+cache_disabled_addition: str = "\r\nCache-Control: no-store, must-revalidate\r\nPragma: no-cache\r\nExpires: 0"
 cwd: str = "."
+charset: str = "UTF-8"
 
 TEMPLATES: Dict[str, str] = {}
 STATIC: Dict[str, str] = {}
 
 class HTTPRequestHandler():
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, logger: Logger = None) -> None:
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, logger: Logger = None, disable_cache: bool = False) -> None:
         self.reader = reader
         self.writer = writer
         self.headers: Dict[str, str] = None
@@ -76,6 +78,7 @@ class HTTPRequestHandler():
         self.version: str = "HTTP/1.0"
         self.logger = logger
         self.close_event = Event()
+        self.disable_cache = disable_cache
 
     async def handle_request(self):
         try:
@@ -141,23 +144,24 @@ class HTTPRequestHandler():
         data: Union[str, bytes] = STATIC[".".join(name.split(".")[:-1])]
         if (isinstance(data, str) and data.startswith("PATH")):
             _path = data.split("|")[-1]
-            with open(path.join(cwd, _path), "r") as fp:
+            with open(path.join(cwd, _path), "r", encoding=charset.lower()) as fp:
                 data = fp.read()
         return data
 
     def send_message(self, response_code: ResponseCode, payload: Union[str, Dict[Any, Any], bytes], timing: str = "") -> None:
         if self.close_event.is_set(): return
-        content_type = "text/html"
+        content_type = f"text/html;charset={charset}"
         if isinstance(payload, (dict)):
-            content_type = "application/json"
+            content_type = f"application/json;charset={charset}"
             payload = dumps(payload)
         if isinstance(payload, bytes):
             content_type = "image/ico"
         if payload is None: payload = ""
-        data = http_header.format(version_info=self.version, response_code=str(response_code), content_type=content_type, length=len(payload), timing=timing).encode()
+        cache_controll = cache_disabled_addition if self.disable_cache else ""
+        data = http_header.format(version_info=self.version, response_code=str(response_code), content_type=content_type, cache_controll=cache_controll, length=len(payload), timing=timing)
         if (self.logger):
-            self.logger.trace(f"Sending data: {data.decode()} with payload: {payload}")
-        self.writer.write(data)
+            self.logger.trace(f"Sending data: {data} with payload: {payload}")
+        self.writer.write(data.encode())
         self.writer.write(payload.encode() if not isinstance(payload, bytes) else payload)
 
     def do_GET(self) -> None:
@@ -169,8 +173,9 @@ class HTTPRequestHandler():
             if (self.logger):
                 self.logger.debug(f"Calling GET {self.path} with params: {self.data}")
             try:
-                html_file = get_rules[self.path](self.data)
+                html_file = get_rules[self.path][0](self.data)
                 response_code = Ok
+                self.disable_cache = get_rules[self.path][1] or self.disable_cache
             except KnownError as ke:
                 html_file = html_template.format(title=pageTitle, content=ke.response.name)
                 response_code = ke.response
@@ -214,8 +219,9 @@ class HTTPRequestHandler():
             self.logger.debug(f"Calling PUT {self.path}")
         message_return: ResponseCode = None
         try:
-            put_rules[self.path](self.data)
+            put_rules[self.path][0](self.data)
             message_return = Ok
+            self.disable_cache = put_rules[self.path][1] or self.disable_cache
         except KnownError as ke:
             message_return = ke.response
             if (self.logger):
@@ -234,9 +240,10 @@ class HTTPRequestHandler():
             self.send_message(message_return, "", f"full={do_put}")
 
 class HTMLServer:
-    def __init__(self, host: str, port: int, root_path: str = ".", logger: Optional[Logger] = None, title: str = "HTML Server"):
+    def __init__(self, host: str, port: int, root_path: str = ".", logger: Optional[Logger] = None, title: str = "HTML Server", disable_cache: bool = False, response_charset: str ="UTF-8"):
         global pageTitle
         global cwd
+        global charset
         self.host = host
         self.port = port
         self.logger = logger
@@ -245,6 +252,8 @@ class HTMLServer:
         pageTitle = title
         cwd = root_path
         self.close_event = Event()
+        self.disable_cache = disable_cache
+        charset = response_charset
 
     def try_log(self, data: str, log_level: LEVEL = LEVEL.INFO) -> None:
         if self.logger == None:
@@ -255,7 +264,7 @@ class HTMLServer:
         data: str = TEMPLATES[name.replace(".html", "")]
         if (data.startswith("PATH")):
             _path = data.split("|")[-1]
-            with open(path.join(cwd, _path), "r") as fp:
+            with open(path.join(cwd, _path), "r", encoding=charset.lower()) as fp:
                 data = fp.read()
         for template, value in kwargs.items():
             if isinstance(value, str):
@@ -279,22 +288,22 @@ class HTMLServer:
             ret.insert(0, f"<option disabled{' selected' if not any_selected else ''} value></option>")
         return "\n".join(ret)
 
-    def add_url_rule(self, rule: str, callback: Callable[[UrlData], str], protocol: Protocol = Protocol.Get) -> None:
+    def add_url_rule(self, rule: str, callback: Callable[[UrlData], str], protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> None:
         if (protocol == Protocol.Get):
-            get_rules[rule] = callback
+            get_rules[rule] = [callback, disable_cache]
         if (protocol == Protocol.Put):
-            put_rules[rule] = callback
+            put_rules[rule] = [callback, disable_cache]
 
-    def as_url_rule(self, rule: str, protocol: Protocol = Protocol.Get) -> Any:
+    def as_url_rule(self, rule: str, protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> Any:
         def decorator(callback: Callable[[UrlData], str]):
-            self.add_url_rule(rule, callback, protocol)
+            self.add_url_rule(rule, callback, protocol, disable_cache)
         return decorator
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         if self.close_event.is_set(): return
         addr = writer.get_extra_info('peername')
         self.try_log(f'Accepted connection from {addr[0]}:{addr[1]}')
-        handler = self.handler(reader, writer, self.logger)
+        handler = self.handler(reader, writer, self.logger, self.disable_cache)
         await handler.handle_request()
 
     async def start(self):

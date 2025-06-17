@@ -18,6 +18,8 @@ from smdb_web_server import HTMLServer, UrlData
 server = HTMLServer("127.0.0.1", 8080, title="Example server")
 ```
 
+If the plaintext or json responses will use any specific encodings you can set the `response_charset` property when creating the HTMLServer. The default value is 'UTF-8'.
+
 An `smdb_logger` can be used, if desired, but not neccesery.
 
 To add a new url path, use the `add_url_rule` command.
@@ -46,6 +48,17 @@ server.serve_forever_threaded(template_dictionary, static_dictionary, "Example T
 ```
 
 Both handlers can fail with [KnownError](#knownerror) exception, whitch will result in a user controlled return code and reason.
+
+To disable caching for one page, set the "disable_cache" flag to true when creating the handler:
+
+```python
+@server.as_url_rule("/help", disable_cache=True)
+def help_handler(url_data: UrlData) -> str:
+    ...
+```
+
+This will send the no_cache flag in the header of the message.
+To do this with the whole application, set the same flag to true, when instanciating the server.
 
 ## GET handler
 
