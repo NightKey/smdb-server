@@ -41,6 +41,7 @@ class Timer():
 class Protocol(Enum):
     Get = "GET"
     Put = "PUT"
+    Post = "POST"
 
 @dataclass
 class UrlData():
@@ -56,8 +57,9 @@ Ok = ResponseCode(200, "Ok")
 InternalServerError = ResponseCode(500, "Internal Server Error")
 TPot = ResponseCode(418, "I'm a teapot")
 
-get_rules: Dict[str, Tuple[Callable[[Dict[str, str]], None], bool]] = {}
-put_rules: Dict[str, Tuple[Callable[[bytes], None], bool]] = {}
+get_rules: Dict[str, Tuple[Callable[[Dict[str, str]], str], bool]] = {}
+put_rules: Dict[str, Tuple[Callable[[bytes], str], bool]] = {}
+post_rules: Dict[str, Tuple[Callable[[bytes], str], bool]] = {}
 pageTitle: str = None
 html_template: str = "<html><header><link rel='stylesheet' href='/static/style.css' /><title>{title}</title></header><body>{content}</body></html>"
 http_header: str = "{version_info} {response_code}\r\nContent-Length: {length}\r\nContent-Type: {content_type}{cache_controll};\r\nServer-Timing: {timing}\r\n\r\n"
@@ -107,8 +109,9 @@ class HTTPRequestHandler():
             if (method == "GET"):
                 self.do_GET()
             elif (method == "PUT"):
-                put_th = Thread(target=self.do_PUT)
-                put_th.start()
+                self.do_PUT()
+            elif (method == "POST"):
+                self.do_POST()
         except CloseException:
             self.close_event.set()
         except Exception as ex :
@@ -219,16 +222,18 @@ class HTTPRequestHandler():
             self.logger.debug(f"Calling PUT {self.path}")
         message_return: ResponseCode = None
         try:
-            put_rules[self.path][0](self.data)
+            result = put_rules[self.path][0](self.data)
             message_return = Ok
             self.disable_cache = put_rules[self.path][1] or self.disable_cache
         except KnownError as ke:
+            result = ""
             message_return = ke.response
             if (self.logger):
                 self.logger.warning(f"Known Exception: {ke}")
         except CloseException:
-                self.close_event.set()
+            self.close_event.set()
         except Exception as ex:
+            result = ""
             message_return = InternalServerError
             if (self.logger):
                 self.logger.error(f"Exception: {ex}")
@@ -237,7 +242,38 @@ class HTTPRequestHandler():
                 self.writer.close()
                 return
             do_put.stop()
-            self.send_message(message_return, "", f"full={do_put}")
+            self.send_message(message_return, result, f"full={do_put}")
+
+    def do_POST(self) -> None:
+        do_post = Timer()
+        if (self.path not in post_rules.keys()):
+            self.__404__(do_post)
+            return
+        if (self.logger):
+            self.logger.debug(f"Calling POST {self.path}")
+        message_return: ResponseCode = None
+        try:
+            result = post_rules[self.path][0](self.data)
+            message_return = Ok
+            self.disable_cache = post_rules[self.path][1] or self.disable_cache
+        except KnownError as ke:
+            result = ""
+            message_return = ke.response
+            if (self.logger):
+                self.logger.warning(f"Known Exception: {ke}")
+        except CloseException:
+            self.close_event.set()
+        except Exception as ex:
+            result = ""
+            message_return = InternalServerError
+            if (self.logger):
+                self.logger.error(f"Exception: {ex}")
+        finally:
+            if self.close_event.is_set():
+                self.writer.close()
+                return
+            do_post.stop()
+            self.send_message(message_return, result, f"full={do_post}")
 
 class HTMLServer:
     def __init__(self, host: str, port: int, root_path: str = ".", logger: Optional[Logger] = None, title: str = "HTML Server", disable_cache: bool = False, response_charset: str ="UTF-8"):
@@ -291,8 +327,10 @@ class HTMLServer:
     def add_url_rule(self, rule: str, callback: Callable[[UrlData], str], protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> None:
         if (protocol == Protocol.Get):
             get_rules[rule] = [callback, disable_cache]
-        if (protocol == Protocol.Put):
+        elif (protocol == Protocol.Put):
             put_rules[rule] = [callback, disable_cache]
+        elif (protocol == Protocol.Post):
+            post_rules[rule] = [callback, disable_cache]
 
     def as_url_rule(self, rule: str, protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> Any:
         def decorator(callback: Callable[[UrlData], str]):

@@ -2,12 +2,13 @@
 An easy to use, not secured web server, because I don't like the other options, and I like to create my own solutions most of the time.
 
 ## Table of content
-|        Section Name         |
-|:---------------------------:|
-| [Usage](#usage)             |
-| [Get handler](#get-handler) |
-| [Put Handler](#put-handler) |
-| [Data](#data)               |
+|        Section Name           |
+|:-----------------------------:|
+| [Usage](#usage)               |
+| [Get handler](#get-handler)   |
+| [Put Handler](#put-handler)   |
+| [Post Handler](#post-handler) |
+| [Data](#data)                 |
 
 ## Usage
 
@@ -73,7 +74,7 @@ def index_handler(url_data: UrlData) -> str:
 If you need to just create a list to update an already rendered HTML page's selector, you can use it the following way:
 
 ```python
-def update(url_data: UrlData):
+def update(url_data: UrlData) -> str:
     return server.render_template_list("example_selector", ["value1|True", "value2|False", "value3|False"])
 
 server.add_url_rule("/update", update)
@@ -102,6 +103,20 @@ def put_handler(url_data: UrlData) -> str:
     ...
 
 server.add_url_rule("/put", put_handler, Protocol.Put)
+```
+
+## Post Handler
+
+This handler can return a simple string. The incoming data will be a bytearray of the body of the request.
+```python
+rom smdb_web_server import Protocol
+
+def post_handler(url_data: UrlData) -> str:
+    # Do stuff here.
+    # Either return with string, or fail with KnownError
+    ...
+
+server.add_url_rule("/post", post_handler, Protocol.Post)
 ```
 
 ## Data
@@ -170,7 +185,7 @@ def fail(_):
 
 This is a simple enum class to use with `add_url_rule` to determine the protocol to be used
 
-Values: `Get`, `Put`
+Values: `Get`, `Put`, `Post`
 
 ### UrlData
 
