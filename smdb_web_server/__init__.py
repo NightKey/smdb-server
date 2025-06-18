@@ -150,7 +150,8 @@ class HTTPRequestHandler():
         data: Union[str, bytes] = STATIC[".".join(name.split(".")[:-1])]
         if (isinstance(data, str) and data.startswith("PATH")):
             _path = data.split("|")[-1]
-            with open(path.join(cwd, _path), "rb", encoding=charset.lower()) as fp:
+            read_mode = "rb" if (_path.split(".")[-1] in ["jpg", "png", "ico", "mp3", "mp4", "wav"]) else "r"
+            with open(path.join(cwd, _path), read_mode, encoding="" if (read_mode == "rb") else charset) as fp:
                 data = fp.read()
         return data
 
