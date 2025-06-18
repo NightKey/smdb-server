@@ -21,6 +21,19 @@ server = HTMLServer("127.0.0.1", 8080, title="Example server")
 
 If the plaintext or json responses will use any specific encodings you can set the `response_charset` property when creating the HTMLServer. The default value is 'UTF-8'.
 
+IP restrictions can be enplaced by a function passed in to `address_filter`. For example, a local IP restriction could look like the following:
+
+```python
+from smdb_web_server import HTMLServer, UrlData
+
+def restrict_ip_to_lan(ip: str) -> bool:
+    return '.'.join(ip.split('.')[:-1]) == '192.168.0'
+
+server = HTMLServer("127.0.0.1", 8080, title="Example server", address_filter=restrict_ip_to_lan)
+```
+
+`disable_cache` can be set to true to prevent the user's browser from caching the data sent.
+
 An `smdb_logger` can be used, if desired, but not neccesery.
 
 To add a new url path, use the `add_url_rule` command.
@@ -194,3 +207,5 @@ This dataclass contains the following fields, either filled or containing `None`
  - fragment: `String` object (Data following the `#` in the URL)
  - query: `Dictionary` with string keys and values (Data following the `?` in the URL). The key will be the part following the `?` or `&` characters, and the value will be the part after the `=` sign. If there is no value, `None` will be used as a value in the dictionary.
  - data: `Bytes` object (Payload of the request, if available)
+ - source: `String` object (source addres of the request)
+ - headers: `Dictionary` with string keys and values (The request's headers)

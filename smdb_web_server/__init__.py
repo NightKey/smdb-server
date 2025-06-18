@@ -6,7 +6,7 @@ from json import dumps
 from threading import Thread, Event
 from time import perf_counter_ns
 from enum import Enum
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 class KnownError(Exception):
     def __init__(self, reason: str, response_code: int) -> None:
@@ -48,9 +48,11 @@ class UrlData():
     query: Dict[str, str]
     fragment: str
     data: bytes
+    sender: str
+    headers: Dict[str, str]
 
     def __str__(self) -> str:
-        return f"UrlData[ path params: {self.query}, fragment: {self.fragment}, data: {self.data} ]"
+        return f"UrlData({self.sender})[ path params: {self.query}, fragment: {self.fragment}, data: {self.data} ]"
 
 NotFound = ResponseCode(404, "Not Found")
 Ok = ResponseCode(200, "Ok")
@@ -71,7 +73,7 @@ TEMPLATES: Dict[str, str] = {}
 STATIC: Dict[str, str] = {}
 
 class HTTPRequestHandler():
-    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, logger: Logger = None, disable_cache: bool = False) -> None:
+    def __init__(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter, logger: Logger = None, disable_cache: bool = False, source_address: str = "") -> None:
         self.reader = reader
         self.writer = writer
         self.headers: Dict[str, str] = None
@@ -81,6 +83,7 @@ class HTTPRequestHandler():
         self.logger = logger
         self.close_event = Event()
         self.disable_cache = disable_cache
+        self.source_address = source_address
 
     async def handle_request(self):
         try:
@@ -105,7 +108,7 @@ class HTTPRequestHandler():
                 data = await self.reader.read(int(self.headers["Content-Length"]))
                 if (self.logger):
                     self.logger.trace(f"Data retrived: {data}")
-            self.data = UrlData(query, fragment, data)
+            self.data = UrlData(query, fragment, data, self.source_address, self.headers)
             if (method == "GET"):
                 self.do_GET()
             elif (method == "PUT"):
@@ -147,7 +150,7 @@ class HTTPRequestHandler():
         data: Union[str, bytes] = STATIC[".".join(name.split(".")[:-1])]
         if (isinstance(data, str) and data.startswith("PATH")):
             _path = data.split("|")[-1]
-            with open(path.join(cwd, _path), "r", encoding=charset.lower()) as fp:
+            with open(path.join(cwd, _path), "rb", encoding=charset.lower()) as fp:
                 data = fp.read()
         return data
 
@@ -276,7 +279,17 @@ class HTTPRequestHandler():
             self.send_message(message_return, result, f"full={do_post}")
 
 class HTMLServer:
-    def __init__(self, host: str, port: int, root_path: str = ".", logger: Optional[Logger] = None, title: str = "HTML Server", disable_cache: bool = False, response_charset: str ="UTF-8"):
+    def __init__(
+            self, 
+            host: str,
+            port: int, 
+            root_path: str = ".", 
+            logger: Optional[Logger] = None, 
+            title: str = "HTML Server", 
+            disable_cache: bool = False, 
+            response_charset: str = "UTF-8",
+            address_filter: Callable[[str], bool] = lambda _: True
+    ):
         global pageTitle
         global cwd
         global charset
@@ -290,6 +303,7 @@ class HTMLServer:
         self.close_event = Event()
         self.disable_cache = disable_cache
         charset = response_charset
+        self.address_filter = address_filter
 
     def try_log(self, data: str, log_level: LEVEL = LEVEL.INFO) -> None:
         if self.logger == None:
@@ -340,6 +354,10 @@ class HTMLServer:
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         if self.close_event.is_set(): return
         addr = writer.get_extra_info('peername')
+        if (not self.address_filter(addr[0])): 
+            self.try_log(f"Connection refused from {addr[0]}:{addr[1]}")
+            writer.close()
+            return
         self.try_log(f'Accepted connection from {addr[0]}:{addr[1]}')
         handler = self.handler(reader, writer, self.logger, self.disable_cache)
         await handler.handle_request()
