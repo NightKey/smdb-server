@@ -81,7 +81,7 @@ class HTTPRequestHandler:
         except CloseException:
             self.close_event.set()
         except Exception as ex:
-            self.logger.error(f"Exception: {ex}")
+            self.logger.error(f"Exception during handling request a request", ex)
             html_file = HTTPRequestHandler.html_template.format(title=self.page_title, content=ex)
             response_code = Constants.InternalServerError
             self.send_message(response_code, html_file)
@@ -122,7 +122,7 @@ class HTTPRequestHandler:
                      timing: str = "") -> None:
         if self.close_event.is_set(): return
         content_type = f"text/html;charset={self.charset}"
-        if isinstance(payload, (dict)):
+        if isinstance(payload, dict):
             content_type = f"application/json;charset={self.charset}"
             payload = dumps(payload)
         if isinstance(payload, bytes):
@@ -165,7 +165,7 @@ class HTTPRequestHandler:
                 html_file = HTTPRequestHandler.html_template.format(title=self.page_title, content=ex)
                 response_code = Constants.InternalServerError
                 if self.logger:
-                    self.logger.error(f"Exception: {ex}")
+                    self.logger.error(f"Exception during handling a GET request for {self.path}", ex)
             finally:
                 if self.close_event.is_set():
                     self.writer.close()
@@ -210,7 +210,7 @@ class HTTPRequestHandler:
         except Exception as ex:
             message_return = Constants.InternalServerError
             if self.logger:
-                self.logger.error(f"Exception: {ex}")
+                self.logger.error(f"Exception during handling a PUT request for {self.path}", ex)
         finally:
             if self.close_event.is_set():
                 self.writer.close()
@@ -240,7 +240,7 @@ class HTTPRequestHandler:
         except Exception as ex:
             message_return = Constants.InternalServerError
             if self.logger:
-                self.logger.error(f"Exception: {ex}")
+                self.logger.error(f"Exception during handling a POST request for {self.path}", ex)
         finally:
             if self.close_event.is_set():
                 self.writer.close()
