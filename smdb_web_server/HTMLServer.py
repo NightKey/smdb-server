@@ -75,9 +75,10 @@ class HTMLServer:
         elif protocol == Protocol.Post:
             post_rules[rule] = [callback, disable_cache]
 
-    def as_url_rule(self, rule: str, protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> Any:
+    @classmethod
+    def as_url_rule(cls, rule: Optional[str] = None, protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> Any:
         def decorator(callback: Callable[[UrlData], str]):
-            self.add_url_rule(rule, callback, protocol, disable_cache)
+            cls.add_url_rule(rule or callback.__name__, callback, protocol, disable_cache)
         return decorator
 
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
