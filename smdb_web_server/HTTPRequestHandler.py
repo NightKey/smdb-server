@@ -15,7 +15,7 @@ cwd: str = "."
 
 class HTTPRequestHandler:
     html_template: str = "<html><header><link rel='stylesheet' href='/static/style.css' /><title>{title}</title></header><body>{content}</body></html>"
-    http_header: str = "{version_info} {response_code}\r\nContent-Length: {length}\r\nContent-Type: {content_type}{cache_controll};\r\nServer-Timing: {timing}\r\n\r\n"
+    http_header: str = "{version_info} {response_code}\r\nContent-Length: {length}\r\nContent-Type: {content_type}{cache_control};\r\nServer-Timing: {timing}\r\n\r\n"
     cache_disabled_addition: str = "\r\nCache-Control: no-store, must-revalidate\r\nPragma: no-cache\r\nExpires: 0"
 
     def __init__(
@@ -65,13 +65,14 @@ class HTTPRequestHandler:
             self.path = tmp_path[0]
             self.headers = {head.split(": ")[0]: head.split(": ")[1] for head in tmp[1:] if head != ''}
             if self.logger:
-                self.logger.debug(f"Headers retrived: {self.headers}")
+                self.logger.debug(f"Headers retried: {self.headers}")
             data = None
             if "Content-Length" in self.headers:
                 data = await self.reader.read(int(self.headers["Content-Length"]))
                 if self.logger:
-                    self.logger.trace(f"Data retrived: {data}")
+                    self.logger.trace(f"Data retried: {data}")
             self.data = UrlData(query, fragment, data, self.source_address, self.headers)
+            self.logger.info(f"Serving request from {self.source_address} with data: {self.data} and with path: {self.path}")
             if method == "GET":
                 self.do_GET()
             elif method == "PUT":
@@ -110,7 +111,7 @@ class HTTPRequestHandler:
 
     @staticmethod
     def render_static_file(name: str) -> bytes:
-        data: Union[str, bytes] = STATIC[".".join(name.split(".")[:-1])]
+        data: Union[str, bytes] = STATIC.get(".".join(name.split(".")[:-1]), None)
         if isinstance(data, str) and data.startswith("PATH"):
             _path = data.split("|")[-1]
             read_mode = "rb" if (_path.split(".")[-1] in ["jpg", "png", "ico", "mp3", "mp4", "wav"]) else "r"
@@ -128,12 +129,12 @@ class HTTPRequestHandler:
         if isinstance(payload, bytes):
             content_type = "image/ico"
         if payload is None: payload = ""
-        cache_controll = HTTPRequestHandler.cache_disabled_addition if self.disable_cache else ""
+        cache_control = HTTPRequestHandler.cache_disabled_addition if self.disable_cache else ""
         data = HTTPRequestHandler.http_header.format(
             version_info=self.version,
             response_code=str(response_code),
             content_type=content_type,
-            cache_controll=cache_controll,
+            cache_control=cache_control,
             length=len(payload),
             timing=timing
         )
