@@ -1,4 +1,5 @@
 import asyncio
+from asyncio import iscoroutinefunction
 from json import dumps
 from threading import Event
 from typing import Dict, Union, Any
@@ -74,11 +75,11 @@ class HTTPRequestHandler:
             self.data = UrlData(query, fragment, data, self.source_address, self.headers)
             self.logger.info(f"Serving request from {self.source_address} with data: {self.data} and with path: {self.path}")
             if method == "GET":
-                self.do_GET()
+                await self.do_GET()
             elif method == "PUT":
-                self.do_PUT()
+                await self.do_PUT()
             elif method == "POST":
-                self.do_POST()
+                await self.do_POST()
         except CloseException:
             self.close_event.set()
         except Exception as ex:
@@ -119,8 +120,12 @@ class HTTPRequestHandler:
                 data = fp.read()
         return data
 
-    def send_message(self, response_code: ResponseCode, payload: Union[str, Dict[Any, Any], bytes],
-                     timing: str = "") -> None:
+    def send_message(
+            self,
+            response_code: ResponseCode,
+            payload: Union[str, Dict[Any, Any], bytes],
+            timing: str = ""
+    ) -> None:
         if self.close_event.is_set(): return
         content_type = f"text/html;charset={self.charset}"
         if isinstance(payload, dict):
@@ -128,6 +133,8 @@ class HTTPRequestHandler:
             payload = dumps(payload)
         if isinstance(payload, bytes):
             content_type = "image/ico"
+        if "css" in self.path:
+            content_type = "text/css"
         if payload is None: payload = ""
         cache_control = HTTPRequestHandler.cache_disabled_addition if self.disable_cache else ""
         data = HTTPRequestHandler.http_header.format(
@@ -143,7 +150,7 @@ class HTTPRequestHandler:
         self.writer.write(data.encode())
         self.writer.write(payload.encode() if not isinstance(payload, bytes) else payload)
 
-    def do_GET(self) -> None:
+    async def do_GET(self) -> None:
         do_get = Timer()
         if self.path in get_rules.keys():
             get_rules_time = Timer()
@@ -152,7 +159,11 @@ class HTTPRequestHandler:
             if self.logger:
                 self.logger.debug(f"Calling GET {self.path} with params: {self.data}")
             try:
-                html_file = get_rules[self.path][0](self.data)
+                callback = get_rules[self.path][0]
+                if iscoroutinefunction(callback):
+                    html_file = await callback(self.data)
+                else:
+                    html_file = callback(self.data)
                 response_code = Constants.Ok
                 self.disable_cache = get_rules[self.path][1] or self.disable_cache
             except KnownError as ke:
@@ -174,6 +185,7 @@ class HTTPRequestHandler:
                     do_get.stop()
                     get_rules_time.stop()
                     self.send_message(response_code, html_file, f"full;dur={do_get}, process;dur={get_rules_time}")
+            return
 
         if self.path.startswith("/static") or self.path == "/favicon.ico":
             if self.logger:
@@ -187,9 +199,10 @@ class HTTPRequestHandler:
             do_get.stop()
             self.send_message(Constants.Ok, html_file, f"full;dur={do_get}, process;dur={static}")
             return
+
         self.__404__(do_get)
 
-    def do_PUT(self) -> None:
+    async def do_PUT(self) -> None:
         do_put = Timer()
         if self.path not in put_rules.keys():
             self.__404__(do_put)
@@ -199,8 +212,12 @@ class HTTPRequestHandler:
         message_return: ResponseCode = None
         result = ""
         try:
-            result = put_rules[self.path][0](self.data)
-            message_return = Constants.Ok
+            callback = put_rules[self.path][0]
+            result = None
+            if iscoroutinefunction(callback):
+                result = await callback(self.data)
+            else:
+                result = callback(self.data)
             self.disable_cache = put_rules[self.path][1] or self.disable_cache
         except KnownError as ke:
             message_return = ke.response
@@ -219,7 +236,7 @@ class HTTPRequestHandler:
                 do_put.stop()
                 self.send_message(message_return, result, f"full={do_put}")
 
-    def do_POST(self) -> None:
+    async def do_POST(self) -> None:
         do_post = Timer()
         if self.path not in post_rules.keys():
             self.__404__(do_post)
@@ -229,7 +246,12 @@ class HTTPRequestHandler:
         message_return: ResponseCode = None
         result = ""
         try:
-            result = post_rules[self.path][0](self.data)
+            callback = post_rules[self.path][0]
+            result = None
+            if iscoroutinefunction(callback):
+                result = await callback(self.data)
+            else:
+                result = callback(self.data)
             message_return = Constants.Ok
             self.disable_cache = post_rules[self.path][1] or self.disable_cache
         except KnownError as ke:

@@ -1,6 +1,6 @@
 import asyncio
 from threading import Event, Thread
-from typing import Callable, Dict, Optional, Any, List
+from typing import Callable, Dict, Optional, Any, List, Coroutine, Union
 from os import path
 
 from smdb_logger import Logger, LEVEL
@@ -67,17 +67,17 @@ class HTMLServer:
         return "\n".join(ret)
 
     @staticmethod
-    def add_url_rule(rule: str, callback: Callable[[UrlData], str], protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> None:
+    def add_url_rule(rule: str, callback: Union[Callable[[UrlData], str], Callable[[UrlData], Coroutine[Any, Any, str]]], protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> None:
         if protocol == Protocol.Get:
-            get_rules[rule] = [callback, disable_cache]
+            get_rules[rule] = (callback, disable_cache)
         elif protocol == Protocol.Put:
-            put_rules[rule] = [callback, disable_cache]
+            put_rules[rule] = (callback, disable_cache)
         elif protocol == Protocol.Post:
-            post_rules[rule] = [callback, disable_cache]
+            post_rules[rule] = (callback, disable_cache)
 
     @classmethod
     def as_url_rule(cls, rule: Optional[str] = None, protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> Any:
-        def decorator(callback: Callable[[UrlData], str]):
+        def decorator(callback: Union[Callable[[UrlData], str], Callable[[UrlData], Coroutine[Any, Any, str]]]):
             cls.add_url_rule(rule or callback.__name__, callback, protocol, disable_cache)
         return decorator
 
