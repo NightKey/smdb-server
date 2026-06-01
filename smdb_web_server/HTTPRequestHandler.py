@@ -135,6 +135,8 @@ class HTTPRequestHandler:
             content_type = "image/ico"
         if "css" in self.path:
             content_type = "text/css"
+        if "js" in self.path:
+            content_type = "text/javascript"
         if payload is None: payload = ""
         cache_control = HTTPRequestHandler.cache_disabled_addition if self.disable_cache else ""
         data = HTTPRequestHandler.http_header.format(
