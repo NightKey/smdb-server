@@ -15,7 +15,7 @@ charset: str = ""
 cwd: str = "."
 
 class HTTPRequestHandler:
-    html_template: str = "<html><header><link rel='stylesheet' href='/static/style.css' /><title>{title}</title></header><body>{content}</body></html>"
+    html_template: str = "<html><head><link rel='stylesheet' href='/static/style.css' /><title>{title}</title></head><body>{content}</body></html>"
     http_header: str = "{version_info} {response_code}\r\nContent-Length: {length}\r\nContent-Type: {content_type}{cache_control};\r\nServer-Timing: {timing}\r\n\r\n"
     cache_disabled_addition: str = "\r\nCache-Control: no-store, must-revalidate\r\nPragma: no-cache\r\nExpires: 0"
 
