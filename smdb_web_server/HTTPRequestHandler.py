@@ -6,18 +6,26 @@ from typing import Dict, Union, Any
 from os import path
 
 from smdb_web_server import Timer, ResponseCode, UrlData, CloseException, Constants, KnownError, TEMPLATES, STATIC, \
-    get_rules, put_rules, post_rules
+    get_rules, put_rules, post_rules, async_wrapped, Base, wrapped, show_open_calls
 
-from smdb_logger import Logger, LEVEL
+from smdb_logger import Logger
 
 page_title: str = ""
 charset: str = ""
 cwd: str = "."
 
-class HTTPRequestHandler:
+class HTTPRequestHandler(Base):
     html_template: str = "<html><head><link rel='stylesheet' href='/static/style.css' /><title>{title}</title></head><body>{content}</body></html>"
     http_header: str = "{version_info} {response_code}\r\nContent-Length: {length}\r\nContent-Type: {content_type}{cache_control};\r\nServer-Timing: {timing}\r\n\r\n"
     cache_disabled_addition: str = "\r\nCache-Control: no-store, must-revalidate\r\nPragma: no-cache\r\nExpires: 0"
+
+    @property
+    def logger(self) -> Logger:
+        return self.__logger
+
+    @property
+    def name(self) -> str:
+        return "HTTPRequestHandler"
 
     def __init__(
             self,
@@ -39,7 +47,7 @@ class HTTPRequestHandler:
         self.path: str = ""
         self.data: UrlData = None
         self.version: str = "HTTP/1.0"
-        self.logger = logger
+        self.__logger = logger
         self.close_event = Event()
         self.disable_cache = disable_cache
         self.source_address = source_address
@@ -48,7 +56,7 @@ class HTTPRequestHandler:
         globals()["charset"] = self.charset
         globals()["cwd"] = self.cwd
 
-
+    @async_wrapped
     async def handle_request(self):
         try:
             tmp = await self.reader.readuntil("\r\n\r\n".encode())
@@ -87,7 +95,10 @@ class HTTPRequestHandler:
             html_file = HTTPRequestHandler.html_template.format(title=self.page_title, content=ex)
             response_code = Constants.InternalServerError
             self.send_message(response_code, html_file)
+        finally:
+            show_open_calls(self.logger.trace)
 
+    @wrapped
     def getQueryItems(self, items: str) -> Dict[str, Any]:
         ret = {}
         for item in items.split("&"):
@@ -120,6 +131,7 @@ class HTTPRequestHandler:
                 data = fp.read()
         return data
 
+    @wrapped
     def send_message(
             self,
             response_code: ResponseCode,
@@ -152,6 +164,7 @@ class HTTPRequestHandler:
         self.writer.write(data.encode())
         self.writer.write(payload.encode() if not isinstance(payload, bytes) else payload)
 
+    @async_wrapped
     async def do_GET(self) -> None:
         do_get = Timer()
         if self.path in get_rules.keys():
@@ -204,6 +217,7 @@ class HTTPRequestHandler:
 
         self.__404__(do_get)
 
+    @async_wrapped
     async def do_PUT(self) -> None:
         do_put = Timer()
         if self.path not in put_rules.keys():
@@ -238,6 +252,7 @@ class HTTPRequestHandler:
                 do_put.stop()
                 self.send_message(message_return, result, f"full={do_put}")
 
+    @async_wrapped
     async def do_POST(self) -> None:
         do_post = Timer()
         if self.path not in post_rules.keys():

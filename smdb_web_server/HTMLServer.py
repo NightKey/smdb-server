@@ -1,14 +1,24 @@
 import asyncio
+import warnings
 from threading import Event, Thread
 from typing import Callable, Dict, Optional, Any, List, Coroutine, Union
 from os import path
 
 from smdb_logger import Logger, LEVEL
 
-from smdb_web_server import HTTPRequestHandler, Protocol, UrlData, TEMPLATES, get_rules, put_rules, post_rules, STATIC
+from smdb_web_server import HTTPRequestHandler, Protocol, UrlData, TEMPLATES, get_rules, put_rules, post_rules, STATIC, \
+    async_wrapped, Base, wrapped, show_open_calls
 
 
-class HTMLServer:
+class HTMLServer(Base):
+    @property
+    def logger(self) -> Logger:
+        return self.__logger
+
+    @property
+    def name(self) -> str:
+        return "HTMLServer"
+
     def __init__(
             self,
             host: str,
@@ -22,21 +32,23 @@ class HTMLServer:
     ):
         self.host = host
         self.port = port
-        self.logger = logger
+        self.__logger = logger
         self.handler: HTTPRequestHandler = HTTPRequestHandler
-        self.server = None
+        self.server: asyncio.Server = None
         self.pageTitle = title
         self.cwd = root_path
         self.close_event = Event()
         self.disable_cache = disable_cache
         self.charset = response_charset
         self.address_filter = address_filter
+        self.server_task: asyncio.Task = None
 
     def try_log(self, data: str, log_level: LEVEL = LEVEL.INFO) -> None:
         if self.logger is None:
             return
         self.logger.log(log_level, data)
 
+    @wrapped
     def render_template_file(self, name: str, **kwargs) -> str:
         data: str = TEMPLATES[name.replace(".html", "")]
         if data.startswith("PATH"):
@@ -81,6 +93,7 @@ class HTMLServer:
             cls.add_url_rule(rule or callback.__name__, callback, protocol, disable_cache)
         return decorator
 
+    @async_wrapped
     async def handle_client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         if self.close_event.is_set(): return
         addr = writer.get_extra_info('peername')
@@ -92,6 +105,7 @@ class HTMLServer:
         handler = self.handler(reader=reader, writer=writer, page_title=self.pageTitle, cwd=self.cwd, charset=self.charset, logger=self.logger, disable_cache=self.disable_cache)
         await handler.handle_request()
 
+    @async_wrapped
     async def start(self):
         try:
             self.server = await asyncio.start_server(
@@ -111,20 +125,30 @@ class HTMLServer:
         try:
             self.try_log("Stopping server")
             if self.server:
-                self.server.close()
                 self.close_event.set()
+                self.server.close()
+                self.server_task.cancel()
         except Exception as ex:
             self.try_log(f"Exception stopping server: {ex}")
+        finally:
+            show_open_calls(self.logger.trace)
 
+    @wrapped
+    @warnings.deprecated("This function will be removed")
     def serve_forever_threaded(self, templates: Dict[str, str], static: Dict[str, str], thread_name: str = "SMDB HTTP Server") -> Thread:
         thread = Thread(target=self.serve_forever, args=[templates, static])
         thread.name = thread_name
         thread.start()
         return thread
 
+    @wrapped
+    @warnings.deprecated("This function will not be blocking")
     def serve_forever(self, templates: Dict[str, str], static: Dict[str, str]) -> None:
         for key, value in templates.items():
             TEMPLATES[key] = value
         for key, value in static.items():
             STATIC[key] = value
-        asyncio.run(self.start())
+        loop = asyncio.new_event_loop()
+        self.server_task = loop.create_task(self.start())
+        while not self.server_task.done():
+            loop.run_until_complete(asyncio.sleep(0.5))
