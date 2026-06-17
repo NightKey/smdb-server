@@ -1,5 +1,4 @@
 import asyncio
-import warnings
 from threading import Event, Thread
 from typing import Callable, Dict, Optional, Any, List, Coroutine, Union
 from os import path
@@ -89,7 +88,7 @@ class HTMLServer(Base):
 
     @classmethod
     def as_url_rule(cls, rule: Optional[str] = None, protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> Any:
-        def decorator(callback: Union[Callable[[UrlData], str], Callable[[UrlData], Coroutine[Any, Any, str]]]):
+        def decorator(callback: Union[Callable[[...], str], Callable[[...], Coroutine[Any, Any, str]]]):
             cls.add_url_rule(rule or callback.__name__, callback, protocol, disable_cache)
         return decorator
 
@@ -134,16 +133,30 @@ class HTMLServer(Base):
             show_open_calls(self.logger.trace)
 
     @wrapped
-    @warnings.deprecated("This function will be removed")
     def serve_forever_threaded(self, templates: Dict[str, str], static: Dict[str, str], thread_name: str = "SMDB HTTP Server") -> Thread:
+        """
+        Starts the server on a different thread.
+        **IMPORTANT**: This function will be removed.
+        :param templates: Dictionary of path and value to be returned
+        :param static: Dictionary of path and value to be returned
+        :param thread_name: Default: SMDB HTTP Server
+        :return: The thread created by this call
+        """
+        self.logger.warning("This function will be removed")
         thread = Thread(target=self.serve_forever, args=[templates, static])
         thread.name = thread_name
         thread.start()
         return thread
 
     @wrapped
-    @warnings.deprecated("This function will not be blocking")
     def serve_forever(self, templates: Dict[str, str], static: Dict[str, str]) -> None:
+        """
+        Starts the server and blocks the thread while it's running.
+        **IMPORTANT**: This behavior will change to be non-blocking.
+        :param templates: Dictionary of path and value to be returned
+        :param static: Dictionary of path and value to be returned
+        """
+        self.logger.warning("This function will change to be non-blocking")
         for key, value in templates.items():
             TEMPLATES[key] = value
         for key, value in static.items():

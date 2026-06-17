@@ -1,6 +1,7 @@
 from functools import wraps
 from time import time_ns
 from threading import Lock
+from typing import Callable
 
 from .Base import Base
 
