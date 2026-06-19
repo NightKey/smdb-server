@@ -56,12 +56,9 @@ def help_handler(url_data: UrlData) -> str:
 ```
 
 To start the server, use either the `serve_forever` or the `serve_forever_threaded` function. The first will be a blocking call, the second will create a new thread.
->[!IMPORTANT]
-> The `server_forever` function will no longer be blocking soon, and the `serve_forever_threaded` function will be removed.
-> The new way to start the serving is the `start_serving` function
 
 ```python
-server.start_serving(template_dictionary, static_dictionary)
+server.serve_forever_threaded(template_dictionary, static_dictionary)
 ```
 
 Both handlers can fail with [KnownError](#knownerror) exception, which will result in a user controlled return code and reason.

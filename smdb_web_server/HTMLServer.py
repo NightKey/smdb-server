@@ -143,30 +143,14 @@ class HTMLServer(Base):
             show_open_calls(self.logger.trace)
 
     @wrapped
-    def start_serving(self, templates: Dict[str, str], static: Dict[str, str]) -> None:
-        """
-        Starts the server and blocks the thread while it's running.
-        :param templates: Dictionary of path and value to be returned
-        :param static: Dictionary of path and value to be returned
-        """
-        for key, value in templates.items():
-            TEMPLATES[key] = value
-        for key, value in static.items():
-            STATIC[key] = value
-        loop = asyncio.new_event_loop()
-        self.server_task = loop.create_task(self.start())
-
-    @wrapped
     def serve_forever_threaded(self, templates: Dict[str, str], static: Dict[str, str], thread_name: str = "SMDB HTTP Server") -> Thread:
         """
         Starts the server on a different thread.
-        **IMPORTANT**: This function will be removed.
         :param templates: Dictionary of path and value to be returned
         :param static: Dictionary of path and value to be returned
         :param thread_name: Default: SMDB HTTP Server
         :return: The thread created by this call
         """
-        self.logger.warning("This function will be removed use 'start_serving' instead.")
         thread = Thread(target=self.serve_forever, args=[templates, static])
         thread.name = thread_name
         thread.start()
@@ -176,11 +160,9 @@ class HTMLServer(Base):
     def serve_forever(self, templates: Dict[str, str], static: Dict[str, str]) -> None:
         """
         Starts the server and blocks the thread while it's running.
-        **IMPORTANT**: This behavior will change to be removed.
         :param templates: Dictionary of path and value to be returned
         :param static: Dictionary of path and value to be returned
         """
-        self.logger.warning("This function will change to be removed use 'start_serving' instead.")
         for key, value in templates.items():
             TEMPLATES[key] = value
         for key, value in static.items():
