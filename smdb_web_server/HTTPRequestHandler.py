@@ -10,10 +10,6 @@ from smdb_web_server import Timer, ResponseCode, UrlData, CloseException, Consta
 
 from smdb_logger import Logger
 
-page_title: str = ""
-charset: str = ""
-cwd: str = "."
-
 class HTTPRequestHandler(Base):
     html_template: str = "<html><head><link rel='stylesheet' href='/static/style.css' /><title>{title}</title></head><body>{content}</body></html>"
     http_header: str = "{version_info} {response_code}\r\nContent-Length: {length}\r\nContent-Type: {content_type}{cache_control};\r\nServer-Timing: {timing}\r\n\r\n"
@@ -121,13 +117,13 @@ class HTTPRequestHandler(Base):
         do_get.stop()
         self.send_message(Constants.NotFound, _404_file, f"full;dur={do_get}, process;dur={_404_time}")
 
-    @staticmethod
-    def render_static_file(name: str) -> bytes:
-        data: Union[str, bytes] = STATIC.get(".".join(name.split(".")[:-1]), None)
+    def render_static_file(self, name: str) -> bytes:
+        parsed_name = ".".join(name.split(".")[:-1]) or name
+        data: Union[str, bytes] = STATIC.get(parsed_name, None)
         if isinstance(data, str) and data.startswith("PATH"):
             _path = data.split("|")[-1]
             read_mode = "rb" if (_path.split(".")[-1] in ["jpg", "png", "ico", "mp3", "mp4", "wav"]) else "r"
-            with open(path.join(cwd, _path), read_mode, encoding="" if (read_mode == "rb") else charset) as fp:
+            with open(path.join(self.cwd, _path), read_mode, encoding="" if (read_mode == "rb") else self.charset) as fp:
                 data = fp.read()
         return data
 
@@ -182,14 +178,14 @@ class HTTPRequestHandler(Base):
                 response_code = Constants.Ok
                 self.disable_cache = get_rules[self.path][1] or self.disable_cache
             except KnownError as ke:
-                html_file = HTTPRequestHandler.html_template.format(title=self.page_title, content=ke.response.name)
+                html_file = self.html_template.format(title=self.page_title, content=ke.response.name)
                 response_code = ke.response
                 if self.logger:
                     self.logger.warning(f"Known Exception: {ke}")
             except CloseException:
                 self.close_event.set()
             except Exception as ex:
-                html_file = HTTPRequestHandler.html_template.format(title=self.page_title, content=ex)
+                html_file = self.html_template.format(title=self.page_title, content=ex)
                 response_code = Constants.InternalServerError
                 if self.logger:
                     self.logger.error(f"Exception during handling a GET request for {self.path}", ex)
@@ -206,7 +202,7 @@ class HTTPRequestHandler(Base):
             if self.logger:
                 self.logger.debug(f"Serving static file from path: {self.path}")
             static = Timer()
-            html_file = HTTPRequestHandler.render_static_file(self.path.split("/")[-1])
+            html_file = self.render_static_file(self.path.split("/")[-1])
             if html_file is None:
                 self.__404__(do_get)
                 return

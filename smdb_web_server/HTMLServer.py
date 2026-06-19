@@ -77,6 +77,16 @@ class HTMLServer(Base):
             ret.insert(0, f"<option disabled{' selected' if not any_selected else ''} value></option>")
         return "\n".join(ret)
 
+    def render_static_file(self, name: str) -> str:
+        parsed_name = ".".join(name.split(".")[:-1]) or name
+        data: Union[str, bytes] = STATIC.get(parsed_name, None)
+        if isinstance(data, str) and data.startswith("PATH"):
+            _path = data.split("|")[-1]
+            read_mode = "rb" if (_path.split(".")[-1] in ["jpg", "png", "ico", "mp3", "mp4", "wav"]) else "r"
+            with open(path.join(self.cwd, _path), read_mode, encoding="" if (read_mode == "rb") else self.charset) as fp:
+                data = fp.read()
+        return data
+
     @staticmethod
     def add_url_rule(rule: str, callback: Union[Callable[[UrlData], str], Callable[[UrlData], Coroutine[Any, Any, str]]], protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> None:
         if protocol == Protocol.Get:
@@ -133,6 +143,20 @@ class HTMLServer(Base):
             show_open_calls(self.logger.trace)
 
     @wrapped
+    def start_serving(self, templates: Dict[str, str], static: Dict[str, str]) -> None:
+        """
+        Starts the server and blocks the thread while it's running.
+        :param templates: Dictionary of path and value to be returned
+        :param static: Dictionary of path and value to be returned
+        """
+        for key, value in templates.items():
+            TEMPLATES[key] = value
+        for key, value in static.items():
+            STATIC[key] = value
+        loop = asyncio.new_event_loop()
+        self.server_task = loop.create_task(self.start())
+
+    @wrapped
     def serve_forever_threaded(self, templates: Dict[str, str], static: Dict[str, str], thread_name: str = "SMDB HTTP Server") -> Thread:
         """
         Starts the server on a different thread.
@@ -142,7 +166,7 @@ class HTMLServer(Base):
         :param thread_name: Default: SMDB HTTP Server
         :return: The thread created by this call
         """
-        self.logger.warning("This function will be removed")
+        self.logger.warning("This function will be removed use 'start_serving' instead.")
         thread = Thread(target=self.serve_forever, args=[templates, static])
         thread.name = thread_name
         thread.start()
@@ -152,11 +176,11 @@ class HTMLServer(Base):
     def serve_forever(self, templates: Dict[str, str], static: Dict[str, str]) -> None:
         """
         Starts the server and blocks the thread while it's running.
-        **IMPORTANT**: This behavior will change to be non-blocking.
+        **IMPORTANT**: This behavior will change to be removed.
         :param templates: Dictionary of path and value to be returned
         :param static: Dictionary of path and value to be returned
         """
-        self.logger.warning("This function will change to be non-blocking")
+        self.logger.warning("This function will change to be removed use 'start_serving' instead.")
         for key, value in templates.items():
             TEMPLATES[key] = value
         for key, value in static.items():
