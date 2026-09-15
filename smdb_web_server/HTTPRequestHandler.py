@@ -117,9 +117,9 @@ class HTTPRequestHandler(Base):
         do_get.stop()
         self.send_message(Constants.NotFound, _404_file, f"full;dur={do_get}, process;dur={_404_time}")
 
-    def render_static_file(self, name: str) -> bytes:
+    def render_static_file(self, name: str) -> Union[str, bytes, None]:
         parsed_name = ".".join(name.split(".")[:-1]) or name
-        data: Union[str, bytes] = STATIC.get(parsed_name, None)
+        data: Union[str, bytes, None] = STATIC.get(parsed_name, None)
         if isinstance(data, str) and data.startswith("PATH"):
             _path = data.split("|")[-1]
             read_mode = "rb" if (_path.split(".")[-1] in ["jpg", "png", "ico", "mp3", "mp4", "wav"]) else "r"
@@ -152,7 +152,7 @@ class HTTPRequestHandler(Base):
             response_code=str(response_code),
             content_type=content_type,
             cache_control=cache_control,
-            length=len(payload),
+            length=len(payload) if isinstance(payload, bytes) else len(payload.encode(encoding=self.charset)),
             timing=timing
         )
         if self.logger:

@@ -77,15 +77,8 @@ class HTMLServer(Base):
             ret.insert(0, f"<option disabled{' selected' if not any_selected else ''} value></option>")
         return "\n".join(ret)
 
-    def render_static_file(self, name: str) -> str:
-        parsed_name = ".".join(name.split(".")[:-1]) or name
-        data: Union[str, bytes] = STATIC.get(parsed_name, None)
-        if isinstance(data, str) and data.startswith("PATH"):
-            _path = data.split("|")[-1]
-            read_mode = "rb" if (_path.split(".")[-1] in ["jpg", "png", "ico", "mp3", "mp4", "wav"]) else "r"
-            with open(path.join(self.cwd, _path), read_mode, encoding="" if (read_mode == "rb") else self.charset) as fp:
-                data = fp.read()
-        return data
+    def render_static_file(self, name: str) -> Union[str, bytes, None]:
+        return self.handler.render_static_file(name)
 
     @staticmethod
     def add_url_rule(rule: str, callback: Union[Callable[[UrlData], str], Callable[[UrlData], Coroutine[Any, Any, str]]], protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> None:
