@@ -121,7 +121,7 @@ class HTTPRequestHandler(Base):
         self.send_message(Constants.NotFound, _404_file, f"full;dur={do_get}, process;dur={_404_time}")
 
     def render_static_file(self, name: str) -> Union[str, bytes, None]:
-        return super().__render_static_file(name=name, STATIC=STATIC)
+        return self._render_static_file(name=name, STATIC=STATIC)
 
     @wrapped
     def send_message(

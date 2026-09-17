@@ -25,7 +25,7 @@ class Base(ABC):
     def try_trace(self, message: str) -> None:
         self.try_log(message=message, exception=None, level=LEVEL.TRACE)
 
-    def __render_static_file(self, name: str, STATIC: Dict[str, str] ) -> Union[str, bytes, None]:
+    def _render_static_file(self, name: str, STATIC: Dict[str, str] ) -> Union[str, bytes, None]:
         parsed_name = ".".join(name.split(".")[:-1]) or name
         data: Union[str, bytes, None] = STATIC.get(parsed_name, None)
         if isinstance(data, str) and data.startswith("PATH"):

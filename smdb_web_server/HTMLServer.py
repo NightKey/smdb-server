@@ -66,7 +66,7 @@ class HTMLServer(Base):
         return "\n".join(ret)
 
     def render_static_file(self, name: str) -> Union[str, bytes, None]:
-        return super().__render_static_file(name=name, STATIC=STATIC)
+        return self._render_static_file(name=name, STATIC=STATIC)
 
     @staticmethod
     def add_url_rule(rule: str, callback: Union[Callable[[UrlData], str], Callable[[UrlData], Coroutine[Any, Any, str]]], protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> None:
