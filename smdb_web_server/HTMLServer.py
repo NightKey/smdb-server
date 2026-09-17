@@ -10,14 +10,6 @@ from smdb_web_server import HTTPRequestHandler, Protocol, UrlData, TEMPLATES, ge
 
 
 class HTMLServer(Base):
-    @property
-    def logger(self) -> Logger:
-        return self.__logger
-
-    @property
-    def name(self) -> str:
-        return "HTMLServer"
-
     def __init__(
             self,
             host: str,
@@ -29,23 +21,19 @@ class HTMLServer(Base):
             response_charset: str = "UTF-8",
             address_filter: Callable[[str], bool] = lambda _: True
     ):
+        super().__init__(
+            logger=logger,
+            cwd=root_path,
+            charset=response_charset
+        )
         self.host = host
         self.port = port
-        self.__logger = logger
-        self.handler: HTTPRequestHandler = HTTPRequestHandler
-        self.server: asyncio.Server = None
+        self.server: Union[asyncio.Server, None] = None
         self.pageTitle = title
-        self.cwd = root_path
         self.close_event = Event()
         self.disable_cache = disable_cache
-        self.charset = response_charset
         self.address_filter = address_filter
-        self.server_task: asyncio.Task = None
-
-    def try_log(self, data: str, log_level: LEVEL = LEVEL.INFO) -> None:
-        if self.logger is None:
-            return
-        self.logger.log(log_level, data)
+        self.server_task: Union[asyncio.Task, None] = None
 
     @wrapped
     def render_template_file(self, name: str, **kwargs) -> str:
@@ -78,7 +66,7 @@ class HTMLServer(Base):
         return "\n".join(ret)
 
     def render_static_file(self, name: str) -> Union[str, bytes, None]:
-        return self.handler.render_static_file(name)
+        return self.__render_static_file(name=name, STATIC=STATIC)
 
     @staticmethod
     def add_url_rule(rule: str, callback: Union[Callable[[UrlData], str], Callable[[UrlData], Coroutine[Any, Any, str]]], protocol: Protocol = Protocol.Get, disable_cache: bool = False) -> None:
@@ -100,11 +88,11 @@ class HTMLServer(Base):
         if self.close_event.is_set(): return
         addr = writer.get_extra_info('peername')
         if not self.address_filter(addr[0]):
-            self.try_log(f"Connection refused from {addr[0]}:{addr[1]}")
+            self.try_log(message=f"Connection from {addr[0]}:{addr[1]} refused")
             writer.close()
             return
-        self.try_log(f'Accepted connection from {addr[0]}:{addr[1]}')
-        handler = self.handler(reader=reader, writer=writer, page_title=self.pageTitle, cwd=self.cwd, charset=self.charset, logger=self.logger, disable_cache=self.disable_cache)
+        self.try_log(message=f'Accepted connection from {addr[0]}:{addr[1]}')
+        handler = HTTPRequestHandler(reader=reader, writer=writer, page_title=self.pageTitle, cwd=self.cwd, charset=self.charset, logger=self.logger, disable_cache=self.disable_cache)
         await handler.handle_request()
 
     @async_wrapped
@@ -115,7 +103,7 @@ class HTMLServer(Base):
                 self.host,
                 self.port
             )
-            self.try_log(f'Serving on {self.host}:{self.port}')
+            self.try_log(message=f'Serving on {self.host}:{self.port}')
             async with self.server:
                 await self.server.serve_forever()
         except asyncio.CancelledError:
@@ -125,13 +113,13 @@ class HTMLServer(Base):
 
     def stop(self):
         try:
-            self.try_log("Stopping server")
+            self.try_log(message="Stopping server")
             if self.server:
                 self.close_event.set()
                 self.server.close()
                 self.server_task.cancel()
         except Exception as ex:
-            self.try_log(f"Exception stopping server: {ex}")
+            self.try_log(message=f"Exception stopping server", exception=ex, level=LEVEL.ERROR)
         finally:
             show_open_calls(self.logger.trace)
 

@@ -1,27 +1,19 @@
 import asyncio
-from asyncio import iscoroutinefunction
+import inspect
 from json import dumps
 from threading import Event
-from typing import Dict, Union, Any
-from os import path
+from typing import Dict, Union, Any, Callable, List
 
 from smdb_web_server import Timer, ResponseCode, UrlData, CloseException, Constants, KnownError, TEMPLATES, STATIC, \
-    get_rules, put_rules, post_rules, async_wrapped, Base, wrapped, show_open_calls
+    get_rules, put_rules, post_rules, async_wrapped, Base, wrapped, show_open_calls, RequestException
 
-from smdb_logger import Logger
+from smdb_logger import Logger, LEVEL
+
 
 class HTTPRequestHandler(Base):
     html_template: str = "<html><head><link rel='stylesheet' href='/static/style.css' /><title>{title}</title></head><body>{content}</body></html>"
     http_header: str = "{version_info} {response_code}\r\nContent-Length: {length}\r\nContent-Type: {content_type}{cache_control};\r\nServer-Timing: {timing}\r\n\r\n"
     cache_disabled_addition: str = "\r\nCache-Control: no-store, must-revalidate\r\nPragma: no-cache\r\nExpires: 0"
-
-    @property
-    def logger(self) -> Logger:
-        return self.__logger
-
-    @property
-    def name(self) -> str:
-        return "HTTPRequestHandler"
 
     def __init__(
             self,
@@ -30,27 +22,26 @@ class HTTPRequestHandler(Base):
             page_title: str,
             cwd: str,
             charset: str,
-            logger: Logger = None,
+            logger: Union[Logger, None] = None,
             disable_cache: bool = False,
-            source_address: str = ""
+            source_address: str = "",
+            source_filter: Callable[[str], bool] = lambda _: True
     ) -> None:
+        super().__init__(
+            logger=logger,
+            cwd=cwd,
+            charset=charset
+        )
         self.reader = reader
         self.writer = writer
         self.page_title: str = page_title
-        self.cwd: str = cwd
-        self.charset: str = charset
-        self.headers: Dict[str, str] = None
         self.path: str = ""
-        self.data: UrlData = None
+        self.data: Union[UrlData, None] = None
         self.version: str = "HTTP/1.0"
-        self.__logger = logger
         self.close_event = Event()
         self.disable_cache = disable_cache
         self.source_address = source_address
-        # For static rendering
-        globals()["pageTitle"] = self.page_title
-        globals()["charset"] = self.charset
-        globals()["cwd"] = self.cwd
+        self.source_filter = source_filter
 
     @async_wrapped
     async def handle_request(self):
@@ -59,25 +50,24 @@ class HTTPRequestHandler(Base):
             tmp = tmp.decode().split("\r\n")
             method, tmp_path, _ = tmp[0].split(" ")
             tmp_path = tmp_path.split("#")
-            fragment = None
+            fragment = ""
             if len(tmp_path) > 1:
                 fragment = tmp_path[-1]
             tmp_path = tmp_path[0]
             tmp_path = tmp_path.split("?")
-            query = None
+            query = {}
             if len(tmp_path) > 1:
-                query = self.getQueryItems(tmp_path[-1])
+                query = self.get_query_items(tmp_path[-1])
             self.path = tmp_path[0]
-            self.headers = {head.split(": ")[0]: head.split(": ")[1] for head in tmp[1:] if head != ''}
-            if self.logger:
-                self.logger.debug(f"Headers retried: {self.headers}")
-            data = None
-            if "Content-Length" in self.headers:
-                data = await self.reader.read(int(self.headers["Content-Length"]))
-                if self.logger:
-                    self.logger.trace(f"Data retried: {data}")
-            self.data = UrlData(query, fragment, data, self.source_address, self.headers)
-            self.logger.info(f"Serving request from {self.source_address} with data: {self.data} and with path: {self.path}")
+            headers = {head.split(": ")[0]: head.split(": ")[1] for head in tmp[1:] if head != ''}
+            if "Forwarded" in headers.keys() and not await self.proxy_user_allowed(headers["Forwarded"].split(";")): return
+            self.try_log(message=f"Headers retried: {headers}", level=LEVEL.DEBUG)
+            data = b''
+            if "Content-Length" in headers:
+                data = await self.reader.read(int(headers["Content-Length"]))
+                self.try_log(message=f"Data retried: {data}", level=LEVEL.TRACE)
+            self.data = UrlData(query, fragment, data, self.source_address, headers)
+            self.try_log(message=f"Serving request from {self.source_address} with data: {self.data} and with path: {self.path}")
             if method == "GET":
                 await self.do_GET()
             elif method == "PUT":
@@ -85,28 +75,41 @@ class HTTPRequestHandler(Base):
             elif method == "POST":
                 await self.do_POST()
         except CloseException:
-            self.close_event.set()
+            await self.cleanup()
         except Exception as ex:
-            self.logger.error(f"Exception during handling request a request", ex)
+            self.try_log(message=f"Exception during handling request a request", exception=ex, level=LEVEL.ERROR)
             html_file = HTTPRequestHandler.html_template.format(title=self.page_title, content=ex)
             response_code = Constants.InternalServerError
             self.send_message(response_code, html_file)
         finally:
-            show_open_calls(self.logger.trace)
+            show_open_calls(self.try_trace)
+
+    @async_wrapped
+    async def proxy_user_allowed(self, forward_headers: List[str]) -> bool:
+        for f_header in forward_headers:
+            (key, value) = f_header.split("=")
+            if key == "for" and not self.source_filter(value):
+                self.try_log(message=f"IP address {value} was refused by source filter")
+                html_file = HTTPRequestHandler.html_template.format(title=self.page_title,content="IP your IP address is not allowed")
+                response_code = Constants.Forbidden
+                self.send_message(response_code, html_file)
+                await self.cleanup()
+                return False
+        else:
+            return True
 
     @wrapped
-    def getQueryItems(self, items: str) -> Dict[str, Any]:
+    def get_query_items(self, items: str) -> Dict[str, str]:
         ret = {}
         for item in items.split("&"):
             if len(item.split("=")) == 2:
                 ret[item.split("=")[0]] = item.split("=")[1]
             else:
-                ret[item] = None
+                ret[item] = ""
         return ret
 
     def __404__(self, do_get: Timer) -> None:
-        if self.logger:
-            self.logger.debug("Sending 404 page.")
+        self.try_log(message="Sending 404 page.", level=LEVEL.DEBUG)
         _404_time = Timer()
         _404_file = ""
         if "404" in TEMPLATES:
@@ -118,14 +121,7 @@ class HTTPRequestHandler(Base):
         self.send_message(Constants.NotFound, _404_file, f"full;dur={do_get}, process;dur={_404_time}")
 
     def render_static_file(self, name: str) -> Union[str, bytes, None]:
-        parsed_name = ".".join(name.split(".")[:-1]) or name
-        data: Union[str, bytes, None] = STATIC.get(parsed_name, None)
-        if isinstance(data, str) and data.startswith("PATH"):
-            _path = data.split("|")[-1]
-            read_mode = "rb" if (_path.split(".")[-1] in ["jpg", "png", "ico", "mp3", "mp4", "wav"]) else "r"
-            with open(path.join(self.cwd, _path), read_mode, encoding="" if (read_mode == "rb") else self.charset) as fp:
-                data = fp.read()
-        return data
+        return self.__render_static_file(name=name, STATIC=STATIC)
 
     @wrapped
     def send_message(
@@ -155,8 +151,7 @@ class HTTPRequestHandler(Base):
             length=len(payload) if isinstance(payload, bytes) else len(payload.encode(encoding=self.charset)),
             timing=timing
         )
-        if self.logger:
-            self.logger.trace(f"Sending data: {data} with payload: {payload}")
+        self.try_log(message=f"Sending data: {data} with payload: {payload}", level=LEVEL.TRACE)
         self.writer.write(data.encode())
         self.writer.write(payload.encode() if not isinstance(payload, bytes) else payload)
 
@@ -166,12 +161,13 @@ class HTTPRequestHandler(Base):
         if self.path in get_rules.keys():
             get_rules_time = Timer()
             html_file = ""
-            response_code: ResponseCode = None
-            if self.logger:
-                self.logger.debug(f"Calling GET {self.path} with params: {self.data}")
+            response_code: ResponseCode = Constants.InternalServerError
+            self.try_log(message=f"Calling GET {self.path} with params: {self.data}", level=LEVEL.DEBUG)
             try:
+                if self.data is None:
+                    raise RequestException(f"GET request does not have data: {self.path}")
                 callback = get_rules[self.path][0]
-                if iscoroutinefunction(callback):
+                if inspect.iscoroutinefunction(callback):
                     html_file = await callback(self.data)
                 else:
                     html_file = callback(self.data)
@@ -180,27 +176,25 @@ class HTTPRequestHandler(Base):
             except KnownError as ke:
                 html_file = self.html_template.format(title=self.page_title, content=ke.response.name)
                 response_code = ke.response
-                if self.logger:
-                    self.logger.warning(f"Known Exception: {ke}")
+                self.try_log(message=f"Known Exception: {ke}", level=LEVEL.WARNING)
             except CloseException:
-                self.close_event.set()
+                await self.cleanup()
+            except RequestException as rex:
+                html_file = self.html_template.format(title=self.page_title, content=rex)
+                response_code = Constants.BadRequest
+                self.try_log(message=f"Request Exception: {rex}", level=LEVEL.WARNING)
             except Exception as ex:
                 html_file = self.html_template.format(title=self.page_title, content=ex)
-                response_code = Constants.InternalServerError
-                if self.logger:
-                    self.logger.error(f"Exception during handling a GET request for {self.path}", ex)
+                self.try_log(message=f"Exception during handling a GET request for {self.path}", exception=ex, level=LEVEL.ERROR)
             finally:
-                if self.close_event.is_set():
-                    self.writer.close()
-                else:
+                if not self.close_event.is_set():
                     do_get.stop()
                     get_rules_time.stop()
                     self.send_message(response_code, html_file, f"full;dur={do_get}, process;dur={get_rules_time}")
             return
 
         if self.path.startswith("/static") or self.path == "/favicon.ico":
-            if self.logger:
-                self.logger.debug(f"Serving static file from path: {self.path}")
+            self.try_log(message=f"Serving static file from path: {self.path}", level=LEVEL.DEBUG)
             static = Timer()
             html_file = self.render_static_file(self.path.split("/")[-1])
             if html_file is None:
@@ -219,32 +213,32 @@ class HTTPRequestHandler(Base):
         if self.path not in put_rules.keys():
             self.__404__(do_put)
             return
-        if self.logger:
-            self.logger.debug(f"Calling PUT {self.path}")
-        message_return: ResponseCode = None
+        self.try_log(message=f"Calling PUT {self.path}", level=LEVEL.DEBUG)
+        message_return: ResponseCode = Constants.InternalServerError
         result = ""
         try:
+            if self.data is None:
+                raise RequestException(f"PUT request does not have data: {self.path}")
             callback = put_rules[self.path][0]
-            result = None
-            if iscoroutinefunction(callback):
+            if inspect.iscoroutinefunction(callback):
                 result = await callback(self.data)
             else:
                 result = callback(self.data)
             self.disable_cache = put_rules[self.path][1] or self.disable_cache
         except KnownError as ke:
             message_return = ke.response
-            if self.logger:
-                self.logger.warning(f"Known Exception: {ke}")
+            self.try_log(message=f"Known Exception: {ke}", level=LEVEL.WARNING)
         except CloseException:
-            self.close_event.set()
+            await self.cleanup()
+        except RequestException as rex:
+            result = self.html_template.format(title=self.page_title, content=rex)
+            message_return = Constants.BadRequest
+            self.try_log(message=f"Request Exception: {rex}", level=LEVEL.WARNING)
         except Exception as ex:
             message_return = Constants.InternalServerError
-            if self.logger:
-                self.logger.error(f"Exception during handling a PUT request for {self.path}", ex)
+            self.try_log(message=f"Exception during handling a PUT request for {self.path}", exception=ex, level=LEVEL.ERROR)
         finally:
-            if self.close_event.is_set():
-                self.writer.close()
-            else:
+            if not self.close_event.is_set():
                 do_put.stop()
                 self.send_message(message_return, result, f"full={do_put}")
 
@@ -254,14 +248,14 @@ class HTTPRequestHandler(Base):
         if self.path not in post_rules.keys():
             self.__404__(do_post)
             return
-        if self.logger:
-            self.logger.debug(f"Calling POST {self.path}")
-        message_return: ResponseCode = None
+        self.try_log(message=f"Calling POST {self.path}", level=LEVEL.DEBUG)
+        message_return: ResponseCode = Constants.InternalServerError
         result = ""
         try:
+            if self.data is None:
+                raise RequestException(f"POST request does not have data: {self.path}")
             callback = post_rules[self.path][0]
-            result = None
-            if iscoroutinefunction(callback):
+            if inspect.iscoroutinefunction(callback):
                 result = await callback(self.data)
             else:
                 result = callback(self.data)
@@ -269,17 +263,22 @@ class HTTPRequestHandler(Base):
             self.disable_cache = post_rules[self.path][1] or self.disable_cache
         except KnownError as ke:
             message_return = ke.response
-            if self.logger:
-                self.logger.warning(f"Known Exception: {ke}")
+            self.try_log(message=f"Known Exception: {ke}", level=LEVEL.WARNING)
         except CloseException:
-            self.close_event.set()
+            await self.cleanup()
+        except RequestException as rex:
+            result = self.html_template.format(title=self.page_title, content=rex)
+            message_return = Constants.BadRequest
+            self.try_log(message=f"Request Exception: {rex}", level=LEVEL.WARNING)
         except Exception as ex:
             message_return = Constants.InternalServerError
-            if self.logger:
-                self.logger.error(f"Exception during handling a POST request for {self.path}", ex)
+            self.try_log(message=f"Exception during handling a POST request for {self.path}", exception=ex, level=LEVEL.ERROR)
         finally:
-            if self.close_event.is_set():
-                self.writer.close()
-            else:
+            if not self.close_event.is_set():
                 do_post.stop()
                 self.send_message(message_return, result, f"full={do_post}")
+
+    @async_wrapped
+    async def cleanup(self) -> None:
+        self.close_event.set()
+        self.writer.close()
