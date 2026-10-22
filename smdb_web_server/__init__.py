@@ -4,8 +4,8 @@ from .data import *
 from .errors import *
 
 get_rules: Dict[str, Tuple[Union[Callable[[UrlData], str], Callable[[UrlData], Coroutine[Any, Any, str]]], bool]] = {}
-put_rules: Dict[str, Tuple[Union[Callable[[UrlData], str], Callable[[UrlData], Coroutine[Any, Any, str]]], bool]] = {}
-post_rules: Dict[str, Tuple[Union[Callable[[UrlData], str], Callable[[UrlData], Coroutine[Any, Any, str]]], bool]] = {}
+put_rules: Dict[str, Tuple[Union[Callable[[UrlData], Union[str, None]], Callable[[UrlData], Coroutine[Any, Any, Union[str, None]]]], bool]] = {}
+post_rules: Dict[str, Tuple[Union[Callable[[UrlData], Union[str, None]], Callable[[UrlData], Coroutine[Any, Any, Union[str, None]]]], bool]] = {}
 TEMPLATES: Dict[str, str] = {}
 STATIC: Dict[str, str] = {}
 

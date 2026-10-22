@@ -224,6 +224,9 @@ class HTTPRequestHandler(Base):
                 result = await callback(self.data)
             else:
                 result = callback(self.data)
+            if result is None:
+                message_return = Constants.OkNoResponse
+                result = ""
             self.disable_cache = put_rules[self.path][1] or self.disable_cache
         except KnownError as ke:
             message_return = ke.response
@@ -259,6 +262,9 @@ class HTTPRequestHandler(Base):
                 result = await callback(self.data)
             else:
                 result = callback(self.data)
+            if result is None:
+                message_return = Constants.OkNoResponse
+                result = ""
             message_return = Constants.Ok
             self.disable_cache = post_rules[self.path][1] or self.disable_cache
         except KnownError as ke:

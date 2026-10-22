@@ -76,7 +76,7 @@ To do this with the whole application, set the same flag to true, when instantia
 
 ## GET handler
 
-This handler can return any string, but it's useful, if it returns an HTML file as string. This can be a hardcoded HTML code, or a static or dynamic file. For rendering HTML template files, the server has a helper function called `render_template_file`. This can render an HTML file from a pre setup dictionary.
+This handler can return any string, but it's useful, if it returns an HTML file as string. This can be a hardcoded HTML code, or a static or dynamic file. For rendering HTML template files, the server has a helper function called `render_template_file`. This can render an HTML file from a pre-setup dictionary.
 
 ```python
 def index_handler(url_data: UrlData) -> str:
@@ -106,7 +106,7 @@ This list will be sent as a `plaintext` response.
 
 ## Put Handler
 
-This handler can return a simple string. The incoming data will be a bytearray of the body of the request.
+This handler can return a simple string or None. The incoming data will be the [UrlData](#urldata) of the request.
 ```python
 from smdb_web_server import Protocol
 
@@ -120,7 +120,7 @@ server.add_url_rule("/put", put_handler, Protocol.Put)
 
 ## Post Handler
 
-This handler can return a simple string. The incoming data will be a bytearray of the body of the request.
+This handler can return a simple string or None. The incoming data will be the [UrlData](#urldata) of the request.
 ```python
 rom smdb_web_server import Protocol
 
